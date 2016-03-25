@@ -9,11 +9,13 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.collections import PatchCollection
-from shapely.geometry import Polygon
-from descartes.patch import PolygonPatch
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns
 
+from shapely.geometry import Polygon
+from descartes.patch import PolygonPatch
 import shapefile
+
 
 sns.set(style='ticks', context='paper')
 
@@ -375,7 +377,7 @@ def attachPlotValues(grid, filename, timestep, icol=' icell', jcol=' jcell',
     return joined
 
 def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
-    cmap=plt.cm.Blues, **figkwargs):
+    cmap=plt.cm.Blues, vextent=None, log=True, streamlines=False, **figkwargs):
     '''
         Creates a matplotlib figure of model grid with some output values assoicated
         with each cell
@@ -412,31 +414,49 @@ def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
     else:
         raise ValueError("`ax` must be None or an MPL Axes object")
 
-    # set the axes aspect ration and limits based on the data
+    # set the axes aspect ratio and limits based on the data
     # TODO: this needs to be based on extents, not centroids
     ax.set_xlim((grid.easting.min()*.999, grid.easting.max()*1.001))
     ax.set_ylim((grid.northing.min()*.999, grid.northing.max()*1.001))
     ax.set_aspect('equal')
 
     # create a normalization object based on the data
-    norm = plt.Normalize(vmin=grid.value.min(), vmax=grid.value.max())
-
+    if vextent is None:
+        norm = plt.Normalize(vmin=grid.value.min(), vmax=grid.value.max())
+        if log:
+            norm = matplotlib.colors.LogNorm(vmin=grid.value.min()+1E-10, vmax=grid.value.max())
+    else:
+        norm = plt.Normalize(vmin=np.min(vextent), vmax=np.max(vextent))
+        if log:
+            norm = matplotlib.colors.LogNorm(vmin=np.min(ve+1E-10), vmax=np.max(ve))
     # create a ScalarMappable based on the normalization object
     # (this is what the colorbar will be based off of)
+    cmap.set_under('white')
+    cmap.set_bad('white')
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
 
     # and set it's values to the grid.values.column (may be unnecessary)
     sm._A = np.array(grid.value.tolist())
 
     # stuff the `patches` (grid cells) column of the grid in a PatchCollection
+    edgecol = sm.to_rgba(grid.value.values)*0 + .7
+
+    if not streamlines:
+        facecolors = grid.value.values
+    else:
+        facecolors = np.zeros(grid.value.values.shape)
+
     patches = PatchCollection(grid.patch.tolist(), match_original=False,
-        facecolors=sm.to_rgba(grid.value.values), linewidths=[0,0,0])
+        facecolors=sm.to_rgba(grid.value.values), linewidths=[.25,.25,.25],
+            edgecolors=edgecol)
 
     # plot the grid cells on the axes
     ax.add_collection(patches)
 
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.2)
     # add ad horizontal colorbar (defaults to bottom of figure)
-    plt.colorbar(sm, orientation='horizontal')
+    plt.colorbar(sm, orientation='vertical', cax=cax)
 
     # format the tick labels
     fmt = ScalarFormatter(useOffset=False)
@@ -444,9 +464,9 @@ def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
     ax.yaxis.set_major_formatter(fmt)
     _rotate_tick_labels(ax)
     sns.despine()
-    time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes, fontsize=8,
+    time_text = ax.text(0.8, 0.9, '', transform=ax.transAxes, fontsize=8,
             verticalalignment='top')
-    textstr = grid['datetime'].iloc[0].strftime("%d/%m/%y")
+    textstr = grid['datetime'].iloc[0].strftime("%Y-%m-%d")
     time_text.set_text(textstr)
     # snug up the figure's layout
     fig.tight_layout()
@@ -463,6 +483,9 @@ def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
 
 
 class GridAesthetics(object):
+    """
+    Class to manage shapefile and plotting values.
+    """
     def __init__(self, datapath, valcol, shapefile, year, month, icol='I_MOD',
             jcol='J_MOD', tcol='DUMPID', gridicol='EFDC_I', gridjcol='EFDC_J',
             ijcol_idx=[4, 5], newfiletype=False, resample_out=None, velocity=False):
@@ -508,9 +531,14 @@ class GridAesthetics(object):
             self._gridValues = gv
         return self._gridValues
 
-    def plot(self, timestep, ax=None, figname=None, cmap=plt.cm.Blues):
-        fig = plotGrid(self.gridValues.xs(timestep, level='tstep'), ax=ax,
-            figname=figname, cmap=cmap)
+    def plot(self, timestep, ax=None, figname=None, figclose=True,
+             cmap=plt.cm.Blues, vextent=None, log=True, streamlines=False,
+             **figkwargs):
+
+        fig = plotGrid(self.gridValues.xs(timestep, level='tstep'),
+                       ax=ax, figname=figname, figclose=figclose, cmap=cmap,
+                       vextent=vextent, log=log, streamlines=streamlines,
+                       **figkwargs)
         return fig
 
     def animate(self, frames=None, ax=None, filename=None, interval=250,
