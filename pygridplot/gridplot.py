@@ -196,188 +196,8 @@ def attachAnimateValues(grid, filename, valcol, year, month, icol='I_MOD', jcol=
     joined = joined.reset_index().set_index(['tstep', 'I', 'J'])
     return joined
 
-def animateGrid(grid, frames, patchcol='patch', valuecol='value', ax=None,
-    filename=None, interval=250, cmap=plt.cm.Blues, axeslims=None, log=True, **figkwargs):
-    '''
-        Creates a matplotlib figure of model grid with some output values
-        associated with each cell
-
-        Input
-        -----
-        grid : pandas.DataFrame
-            ideally, this is output from attachOutputValues(...)
-
-        patchcol : string (default = 'patch')
-            name of the column contain the matplotlib.patches.PathPatches in
-            `grid`
-
-        ax : matplotlib.axes.Axes instance for None (default = None)
-            optional axes on which to the plot the data. If None, one will be
-            made.
-
-        filename : string or None (default = None)
-            path to an image where the figure will be saved
-
-
-        Output
-        ------
-        fig : matplotlib.figure.Figure instance
-            figure containing the plot
-    '''
-    # check the value of `ax`; create if necessary
-    figsize = figkwargs.pop('figsize', (6.0, 6.0))
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize, dpi=300, **figkwargs)
-    elif isinstance(ax, plt.Axes):
-        fig = ax.figure
-    else:
-        raise ValueError("`ax` must be None or an MPL Axes object")
-    lw=.5 #line width
-    # set the axes aspect ratio and limits based on the data
-    # TODO: this needs to be based on extents, not centroids
-
-    # setup the axes limits based on the data for the plotter
-    if axeslims is None:
-        ax.set_xlim((grid.easting.min()*.999, grid.easting.max()*1.001))
-        ax.set_ylim((grid.northing.min()*.999, grid.northing.max()*1.001))
-    elif axeslims is not None:
-        ax.set_xlim(axeslims[0])
-        ax.set_ylim(axeslims[1])
-    ax.set_aspect('equal')
-    # create a normalization object based on the data
-    if log:
-        norm = matplotlib.colors.LogNorm(vmin=grid[valuecol].min()+1E-10,
-            vmax=grid[valuecol].max())
-    else:
-        norm = plt.Normalize(vmin=grid[valuecol].min(), vmax=grid[valuecol].max())
-    # create a ScalarMappable based on the normalization object
-    # (this is what the colorbar will be based off of)
-     # need to plot a single frame to setup the ploter
-    tsteps = grid.index.get_level_values('tstep').unique()
-    gridsubset = grid.xs(tsteps[0], level='tstep')
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    # and set it's values to the grid.values.column (this is necessary)
-    sm._A = np.array(gridsubset[valuecol].tolist())
-
-    patches = PatchCollection(gridsubset[patchcol].tolist(),
-        match_original=False,
-        facecolors=sm.to_rgba(gridsubset[valuecol].values),
-        linewidths=[lw,lw,lw], edgecolor='White'
-    )
-    ax.add_collection(patches)
-    # format the tick labels and other plot aesthetics
-    fmt = ScalarFormatter(useOffset=False)
-    ax.xaxis.set_major_formatter(fmt)
-    ax.yaxis.set_major_formatter(fmt)
-    _rotate_tick_labels(ax)
-    fig.colorbar(sm, orientation='horizontal')
-    sns.despine()
-    time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes, fontsize=8,
-            verticalalignment='top')
-
-    def animate(i):
-        gridsubset = grid.xs(tsteps[i], level='tstep')
-        textstr = gridsubset['datetime'].iloc[0].strftime("%d/%m/%y")
-        time_text.set_text(textstr)
-        sm._A = np.array(gridsubset[valuecol].tolist())
-        patches = PatchCollection(gridsubset[patchcol].tolist(),
-            match_original=False,
-            facecolors=sm.to_rgba(gridsubset[valuecol].values),
-            linewidths=[lw,lw,lw],
-            edgecolor='0.1'
-        )
-        ax.add_collection(patches)
-        gc.collect()
-
-    ani = animation.FuncAnimation(fig, animate, frames,
-        repeat=False, interval=interval)
-
-    if filename is not None:
-        ani.save(filename, fps=30, dpi=300, extra_args=['-vcodec', 'libx264'])
-    return ani
-
-def attachPlotValues(grid, filename, timestep, icol=' icell', jcol=' jcell',
-                       tcol=' time_step', valcol=' value',
-                       cmap=plt.cm.Blues):
-    '''
-        Reads an output file and add matplotlib patches to grid dataframe for
-        plotting
-
-        Input
-        -----
-        grid : pandas.DataFrame
-            output from `readModelGrid(...)`
-
-        filename : string
-            full path to the model output file
-
-        timestep : int
-            timestep number (must be present in the output file)
-
-        icol : string (default = ' icell' # note the leading space)
-            name of the column with I grid cell index
-
-        jcol : string (default = ' jcell' # note the leading space)
-            name of the column with J grid cell index
-
-        tcol : string (default = ' time_stamp' # note the leading space)
-            name of the column containing the timestamp
-
-        valcol : string (default = ' value' # note the leading space)
-            name of the column containing the actual values of the output file
-
-        cmap : matplotlib.colors.Colormap instance (default = plt.cm.Blues)
-            colormap to be applied to the values when plotting
-
-
-        Output
-        ------
-        joined : pandas.dataframe
-            index = integer-based multi-index on the values of I and J
-            columns = [
-                cell = shapely.geometry.Polygon object reprsenting the grid cell
-                area = float value of the area of the grid cell (based on the
-                    shapefiles's coordinate system)
-                value = output value read in from `filename`
-                patch = matplotlib.patches.PathPatch to display each cell
-                easting = local coordinate easting of the grid cell's centroid
-                northing = local coordinate northing of the grid cell's centroid
-    '''
-    # read the data
-    output = pandas.read_csv(filename)
-    newcols = {icol: 'I', jcol: 'J', tcol: 'tstep', valcol: 'value'}
-    output = output.rename(columns=newcols).set_index(['I', 'J', 'tstep'])
-
-    # pull out value column at the timestep (force to DataFrame instead of Series)
-    data = pandas.DataFrame(output.xs(timestep, level='tstep')['value'])
-
-    # join the output data and drop NA values (i.e. cells with no output data)
-    joined = grid.join(data).dropna()
-
-    # normalize all of the values
-    joined['normed_value'] = ((joined.value - joined.value.min()) /
-        joined.value.max())
-
-    # little function to help me make polygon patches for plotting
-    def makePatch(row):
-        '''
-        Input `row` is just a row of a pandas.DataFrame
-        '''
-        # rgb = (row['r'], row['b'], row['g'])
-        patch = PolygonPatch(row['cell'], edgecolor='White', linewidth=0.25)
-        return patch
-
-    # add a matplotlib patch to each row
-    joined['patch'] = joined.apply(makePatch, axis=1)
-
-    # compute easting and northings from the shapes
-    joined['easting'] = joined.apply(lambda row: row['cell'].centroid.x, axis=1)
-    joined['northing'] = joined.apply(lambda row: row['cell'].centroid.y, axis=1)
-
-    return joined
-
-def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
-    cmap=plt.cm.Blues, vextent=None, log=True, streamlines=False, **figkwargs):
+def plotGrid(grid, patchcol='patch', ax=None, cmap=plt.cm.Blues, vextent=None,
+             log=True, blankgrid=False, **figkwargs):
     '''
         Creates a matplotlib figure of model grid with some output values assoicated
         with each cell
@@ -392,13 +212,6 @@ def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
 
         ax : matplotlib.axes.Axes instance for None (default = None)
             optional axes on which to the plot the data. If None, one will be made.
-
-        figname : string or None (default = None)
-            path to an image where the figure will be saved
-
-        figclose : bool (default = True)
-            if True and figname is not None, this will close the figure after being
-            saved to disk.
 
         Output
         ------
@@ -441,7 +254,7 @@ def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
     # stuff the `patches` (grid cells) column of the grid in a PatchCollection
     edgecol = sm.to_rgba(grid.value.values)*0 + .7
 
-    if not streamlines:
+    if not blankgrid:
         facecolors = grid.value.values
     else:
         facecolors = np.zeros(grid.value.values.shape)
@@ -470,14 +283,6 @@ def plotGrid(grid, patchcol='patch', ax=None, figname=None, figclose=True,
     time_text.set_text(textstr)
     # snug up the figure's layout
     fig.tight_layout()
-
-    # save the figure if possible
-    if figname is not None:
-        fig.savefig(figname, bbox_inches='tight', dpi=400)
-
-        # close the figure if possible
-        if figclose:
-            plt.close(fig)
 
     return fig
 
@@ -531,21 +336,11 @@ class GridAesthetics(object):
             self._gridValues = gv
         return self._gridValues
 
-    def plot(self, timestep, ax=None, figname=None, figclose=True,
-             cmap=plt.cm.Blues, vextent=None, log=True, streamlines=False,
-             **figkwargs):
+    def plot(self, timestep, ax=None, cmap=plt.cm.Blues, vextent=None,
+        log=True, blankgrid=False, **figkwargs):
 
         fig = plotGrid(self.gridValues.xs(timestep, level='tstep'),
-                       ax=ax, figname=figname, figclose=figclose, cmap=cmap,
-                       vextent=vextent, log=log, streamlines=streamlines,
-                       **figkwargs)
+                       ax=ax,cmap=cmap, vextent=vextent, log=log,
+                       blankgrid=blankgrid, **figkwargs)
         return fig
 
-    def animate(self, frames=None, ax=None, filename=None, interval=250,
-        cmap=plt.cm.Blues, **figkwargs):
-        if frames is None:
-            frames = (self.gridValues.index
-                .get_level_values('tstep').unique().shape[0])
-        anim = animateGrid(self.gridValues, frames=frames, ax=ax,
-            filename=filename, interval=interval, cmap=cmap, **figkwargs)
-        return anim
