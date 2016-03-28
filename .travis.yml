@@ -27,10 +27,10 @@ install:
   # We just set up a conda environment with the right Python version. This
   # should not need changing.
 
-  - conda create --yes -n test python=$TRAVIS_PYTHON_VERSION
+  - conda create --yes -n test python=$TRAVIS_PYTHON_VERSION pandas seaborn numexpr
   - source activate test
-  - conda install --yes numpy matplotlib nose coverage docopt requests pyyaml
-  - conda install --yes --channel=conda-forge pyproj pygridtools pyshp shapely
+  - conda install --yes --channel=conda-forge pyproj pygridtools pyshp shapely descartes
+  - conda install --yes nose coverage docopt requests pyyaml
   - pip install coveralls
   - pip install .
 
