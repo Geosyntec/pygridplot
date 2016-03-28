@@ -16,7 +16,6 @@ from shapely.geometry import Polygon
 from descartes.patch import PolygonPatch
 import shapefile
 
-
 sns.set(style='ticks', context='paper')
 
 def _rotate_tick_labels(ax):
