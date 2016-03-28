@@ -36,6 +36,25 @@ def _rotate_tick_labels(ax):
         label.set_rotation(45)
         label.set_horizontalalignment('right')
 
+def _read_out(filename, valcol, nrows=None, velocity=False, icol='I_MOD',
+              jcol='J_MOD', tcol='DUMPID', hcol='ST_hr'):
+    if velocity:
+        names = [tcol, hcol ,'END_hr',icol ,
+                 jcol ,'LAYER1' ,'LAYER2' ,'LAYER3' ,
+                 'LAYER4' ,'LAYER5' ,'LAYER6' ,'LAYER7' ,
+                 'LAYER8' ,'LAYER9' ,'LAYER10                       ']
+        output = pandas.read_csv(filename, nrows=nrows, index_col=False,
+            skiprows=2, header=None, names=names)
+    else:
+        output = pandas.read_csv(filename, nrows=nrows, index_col=False, skiprows=1)
+
+    newcols = {icol: 'I', jcol: 'J', tcol: 'tstep', valcol: 'value'}
+    output = output.rename(columns=newcols).set_index(['I', 'J', 'tstep'])
+
+    if velocity:
+        output.loc[:, ['value']]
+    return output
+
 def readModelGrid(shapefilename, icol='MODI', jcol='MODJ', ijcol_idx=[4, 5]):
     '''
         Read in the model grid into a pandas dataframe
@@ -94,12 +113,15 @@ def readModelGrid(shapefilename, icol='MODI', jcol='MODJ', ijcol_idx=[4, 5]):
 
         # set the `cell` column for the row to the actual shape
         grid.loc[I, J]['cell'] = Polygon(shape.points)
+    # compute easting and northings from the shapes
+    grid['easting'] = grid.apply(lambda row: row['cell'].centroid.x, axis=1)
+    grid['northing'] = grid.apply(lambda row: row['cell'].centroid.y, axis=1)
 
     # return the columns we need
-    return grid[['cell', 'area']]
+    return grid[['cell', 'area', 'easting', 'northing']]
 
 def attachAnimateValues(grid, filename, valcol, year, month, icol='I_MOD', jcol='J_MOD',
-                       tcol='DUMPID', timecol='ST_hr', nrows=None, newfiletype=False,
+                       tcol='DUMPID', hcol='ST_hr', nrows=None, newfiletype=False,
                        resample_out=None, velocity=False):
     '''
         Reads an output file and add matplotlib patches to grid dataframe for
@@ -142,26 +164,14 @@ def attachAnimateValues(grid, filename, valcol, year, month, icol='I_MOD', jcol=
                 easting = local coordinate easting of the grid cell's centroid
                 northing = local coordinate northing of the grid cell's centroid
     '''
-    # read the data
-    if newfiletype:
-        if velocity:
-            names = [tcol, timecol ,'END_hr',icol ,
-                     jcol ,'LAYER1' ,'LAYER2' ,'LAYER3' ,
-                     'LAYER4' ,'LAYER5' ,'LAYER6' ,'LAYER7' ,
-                     'LAYER8' ,'LAYER9' ,'LAYER10' ]
-            output = pandas.read_csv(filename, nrows=nrows, index_col=False,
-                skiprows=2, header=None, names=names)
-        else:
-            output = pandas.read_csv(filename, nrows=nrows, index_col=False, skiprows=1)
-    else:
-        output = pandas.read_csv(filename, nrows=nrows, index_col=False)
-    newcols = {icol: 'I', jcol: 'J', tcol: 'tstep', valcol: 'value'}
-    output = output.rename(columns=newcols).set_index(['I', 'J', 'tstep'])
 
-    data = output[['value', timecol]]
+    output = _read_out(filename, valcol, nrows=nrows, velocity=velocity, icol=icol,
+                  jcol=jcol, tcol=tcol, hcol=hcol)
+
+    data = output[['value', hcol]]
     data.reset_index(inplace=True)
     data.dropna(subset=['tstep'], inplace=True)
-    data['datetime'] = (data[timecol].apply(
+    data['datetime'] = (data[hcol].apply(
         lambda dt: datetime.datetime(
             year, month, 1) + datetime.timedelta(dt/24)))
     if resample_out is not None:
@@ -189,10 +199,6 @@ def attachAnimateValues(grid, filename, valcol, year, month, icol='I_MOD', jcol=
 
     # add a matplotlib patch to each row
     joined['patch'] = joined.apply(makePatch, axis=1)
-
-    # compute easting and northings from the shapes
-    joined['easting'] = joined.apply(lambda row: row['cell'].centroid.x, axis=1)
-    joined['northing'] = joined.apply(lambda row: row['cell'].centroid.y, axis=1)
     joined = joined.reset_index().set_index(['tstep', 'I', 'J'])
     return joined
 
@@ -293,25 +299,31 @@ class GridAesthetics(object):
     """
     def __init__(self, datapath, valcol, shapefile, year, month, icol='I_MOD',
             jcol='J_MOD', tcol='DUMPID', gridicol='EFDC_I', gridjcol='EFDC_J',
-            ijcol_idx=[4, 5], newfiletype=False, resample_out=None, velocity=False):
+            hcol='ST_hr', ijcol_idx=[4, 5], newfiletype=False, resample_out=None,
+            velocity=False, u_path=None, v_path=None):
+
         self.shapefile = shapefile
         self.datapath = datapath
+        self._u_path = u_path
+        self._v_path = v_path
         self.year = year
         self.month = month
         self.newfiletype = newfiletype
         self.velocity = velocity
         self.resample_out = resample_out
 
+        self._gridicol = gridicol
+        self._gridjcol = gridjcol
+        self._ijcol_idx = ijcol_idx
+        self._valcol = valcol
+        self._icol = icol
+        self._jcol = jcol
+        self._tcol = tcol
+        self._hcol = hcol
+
         self._modelGrid = None
         self._gridValues = None
-        self._gridicol=gridicol
-        self._gridjcol=gridjcol
-        self._ijcol_idx=ijcol_idx
-        self._valcol = valcol
-        self._icol=icol
-        self._jcol=jcol
-        self._tcol=tcol
-
+        self._uv = None
 
     @property
     def modelGrid(self):
@@ -336,6 +348,24 @@ class GridAesthetics(object):
             self._gridValues = gv
         return self._gridValues
 
+    @property
+    def uv_values(self):
+        if self._uv is None:
+            u = _read_out(self._u_path, self._valcol, velocity=True, icol=self._icol,
+                          jcol=self._jcol, tcol=self._tcol, hcol=self._hcol)
+            v = _read_out(self._v_path, self._valcol, velocity=True, icol=self._icol,
+                          jcol=self._jcol, tcol=self._tcol, hcol=self._hcol)
+            uv = u.join(v, how='inner', lsuffix='_u', rsuffix='_v')
+            uv['value'] = np.sqrt(uv.value_u**2 + uv.value_v**2)
+
+            uv = (uv.reset_index(level='tstep', drop=False)
+                    .join(self.modelGrid, how='outer')
+                    .dropna()
+                    .set_index('tstep', append=True)
+            )
+            self._uv = uv
+        return self._uv
+
     def plot(self, timestep, ax=None, cmap=plt.cm.Blues, vextent=None,
         log=True, blankgrid=False, **figkwargs):
 
@@ -344,3 +374,13 @@ class GridAesthetics(object):
                        blankgrid=blankgrid, **figkwargs)
         return fig
 
+    def add_plot_vectors(self, ax, timestep, scale=9e-4,
+                  alpha=0.7, headwidth=3.5):
+        subset = self.uv_values.xs(timestep, level='tstep')
+
+        ax.quiver(subset.easting, subset.northing,
+                  subset.value_u, subset.value_v,
+                  angles='xy', scale_units='xy', scale=scale,
+                  alpha=alpha, headwidth=headwidth)
+
+        return ax.figure
