@@ -1,46 +1,31 @@
+# Setup script for the pygridplot package
+#
 # Usage: python setup.py install
 #
-
 import os
 from setuptools import setup, find_packages
 
-
-def getDataFiles(datadir):
-    #datadir = os.path.join(folder, subfolder)
-    files = [d for d in map(
-        lambda x: os.path.join(datadir, x),
-        os.listdir(datadir)
-    )]
-    return files
-
-
-DESCRIPTION = "pygridplot: Analyze Lake Tahoe Water Quality Data"
+DESCRIPTION = "pygridplot: Visualization tools for pygridgen"
 LONG_DESCRIPTION = DESCRIPTION
 NAME = "pygridplot"
 VERSION = "0.0.1"
 AUTHOR = "Lucas Nguyen (Geosyntec Consultants)"
 AUTHOR_EMAIL = "lnguyen@geosyntec.com"
-URL = "http://github.com/Geosyntec/pygridplot"
-DOWNLOAD_URL = ""
+URL = "https://github.com/Geosyntec/pygridplot"
+DOWNLOAD_URL = "https://github.com/Geosyntec/pygridplot/archive/master.zip"
 LICENSE = "BSD 3-clause"
-PACKAGES = find_packages(exclude=[])
-PLATFORMS = "Python 2.7, 3.4 and later."
+PACKAGES = find_packages()
+PLATFORMS = "Python 2.7"
 CLASSIFIERS = [
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Intended Audience :: Science/Research",
-    "Topic :: Formats and Protocols :: Data Formats",
-    "Topic :: Scientific/Engineering :: Earth Sciences",
     "Topic :: Software Development :: Libraries :: Python Modules",
     'Programming Language :: Python :: 2.7',
-    'Programming Language :: Python :: 3.4',
-    'Programming Language :: Python :: 3.5',
 ]
-INSTALL_REQUIRES = ['pygridtools', 'pyshp', 'shapely']
-PACKAGE_DATA = {
-    'pygridplot.data': ['*.csv'],
-}
+INSTALL_REQUIRES = ['seaborn', 'numexpr', 'descartes', 'shapely', 'pyshp']
+PACKAGE_DATA = {}
 
 setup(
     name=NAME,
@@ -54,8 +39,8 @@ setup(
     license=LICENSE,
     packages=PACKAGES,
     package_data=PACKAGE_DATA,
+    #data_files=DATA_FILES,
     platforms=PLATFORMS,
     classifiers=CLASSIFIERS,
     install_requires=INSTALL_REQUIRES,
-    zip_safe=False,
 )
