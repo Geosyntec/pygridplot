@@ -35,7 +35,7 @@ def _rotate_tick_labels(ax):
         label.set_rotation(45)
         label.set_horizontalalignment('right')
 
-def _read_out(filename, valcol, nrows=None, velocity=False, icol='I_MOD',
+def read_out(filename, valcol, nrows=None, velocity=False, icol='I_MOD',
               jcol='J_MOD', tcol='DUMPID', hcol='ST_hr'):
     if velocity:
         names = [tcol, hcol ,'END_hr',icol ,
@@ -117,9 +117,9 @@ def readModelGrid(shapefilename, icol='MODI', jcol='MODJ', ijcol_idx=[4, 5]):
     grid['northing'] = grid.apply(lambda row: row['cell'].centroid.y, axis=1)
 
     # return the columns we need
-    return grid[['cell', 'area', 'easting', 'northing']]
+    return grid[['cell', 'easting', 'northing']]
 
-def attachAnimateValues(grid, filename, valcol, year, month, icol='I_MOD', jcol='J_MOD',
+def attachAnimateValues(grid, output, valcol, year, month, icol='I_MOD', jcol='J_MOD',
                        tcol='DUMPID', hcol='ST_hr', nrows=None, newfiletype=False,
                        resample_out=None, velocity=False):
     '''
@@ -163,10 +163,6 @@ def attachAnimateValues(grid, filename, valcol, year, month, icol='I_MOD', jcol=
                 easting = local coordinate easting of the grid cell's centroid
                 northing = local coordinate northing of the grid cell's centroid
     '''
-
-    output = _read_out(filename, valcol, nrows=nrows, velocity=velocity, icol=icol,
-                  jcol=jcol, tcol=tcol, hcol=hcol)
-
     data = output[['value', hcol]]
     data.reset_index(inplace=True)
     data.dropna(subset=['tstep'], inplace=True)
@@ -296,25 +292,26 @@ class GridAesthetics(object):
     """
     Class to manage shapefile and plotting values.
     """
-    def __init__(self, datapath, valcol, shapefile, year, month, icol='I_MOD',
+    def __init__(self, results, valcol, shapefile, year, month, icol='I_MOD',
             jcol='J_MOD', tcol='DUMPID', gridicol='EFDC_I', gridjcol='EFDC_J',
             hcol='ST_hr', ijcol_idx=[4, 5], newfiletype=False, resample_out=None,
-            velocity=False, u_path=None, v_path=None):
+            velocity=False, u_path=None, v_path=None, uv_valcol=None):
 
         self.shapefile = shapefile
-        self.datapath = datapath
+        self.results = results
         self._u_path = u_path
         self._v_path = v_path
         self.year = year
         self.month = month
         self.newfiletype = newfiletype
-        self.velocity = velocity
+        self._velocity = velocity
         self.resample_out = resample_out
 
         self._gridicol = gridicol
         self._gridjcol = gridjcol
         self._ijcol_idx = ijcol_idx
         self._valcol = valcol
+        self._uv_valcol = uv_valcol
         self._icol = icol
         self._jcol = jcol
         self._tcol = tcol
@@ -339,10 +336,19 @@ class GridAesthetics(object):
     @property
     def gridValues(self):
         if self._gridValues is None:
-            gv = attachAnimateValues(self.modelGrid, self.datapath,
+
+            if isinstance(self.results, pandas.DataFrame):
+                newcols = {self._icol: 'I', self._jcol: 'J', self._tcol: 'tstep', self._valcol: 'value'}
+                output = self.results.rename(columns=newcols).set_index(['I', 'J', 'tstep'])
+            else:
+                output = read_out(self.results, self._valcol, nrows=None,
+                                  velocity=self._velocity, icol=self._icol,
+                                  jcol=self._jcol, tcol=self._tcol, hcol=self._hcol)
+
+            gv = attachAnimateValues(self.modelGrid, output,
                 self._valcol, self.year, self.month, icol=self._icol, jcol=self._jcol,
                 tcol=self._tcol, nrows=None, newfiletype=self.newfiletype,
-                resample_out=self.resample_out, velocity=self.velocity
+                resample_out=self.resample_out, velocity=self._velocity
             )
             self._gridValues = gv
         return self._gridValues
@@ -350,12 +356,16 @@ class GridAesthetics(object):
     @property
     def uv_values(self):
         if self._uv is None:
-            u = _read_out(self._u_path, self._valcol, velocity=True, icol=self._icol,
+            if self._uv_valcol is None:
+                self._uv_valcol = self._valcol
+
+            u = read_out(self._u_path, self._uv_valcol, velocity=True, icol=self._icol,
                           jcol=self._jcol, tcol=self._tcol, hcol=self._hcol)
-            v = _read_out(self._v_path, self._valcol, velocity=True, icol=self._icol,
+            v = read_out(self._v_path, self._uv_valcol, velocity=True, icol=self._icol,
                           jcol=self._jcol, tcol=self._tcol, hcol=self._hcol)
             uv = u.join(v, how='inner', lsuffix='_u', rsuffix='_v')
-            uv['value'] = np.sqrt(uv.value_u**2 + uv.value_v**2)
+
+            uv['value_uv'] = np.sqrt(uv.value_u**2 + uv.value_v**2)
 
             uv = (uv.reset_index(level='tstep', drop=False)
                     .join(self.modelGrid, how='outer')
@@ -374,8 +384,16 @@ class GridAesthetics(object):
         return fig
 
     def add_plot_vectors(self, ax, timestep, scale=9e-4,
-                  alpha=0.7, headwidth=3.5):
+                         alpha=0.7, headwidth=3.5, legend=False,
+                         legend_xy=(.5, .5), legend_uv=(.5, .5)):
+
         subset = self.uv_values.xs(timestep, level='tstep')
+
+        if legend:
+            cols = ['value_u', 'value_v', 'easting', 'northing']
+            u, v = legend_uv
+            easting, northing = legend_xy
+            subset.loc[(-99, -99), cols] = (u, v, easting, northing)
 
         ax.quiver(subset.easting, subset.northing,
                   subset.value_u, subset.value_v,
